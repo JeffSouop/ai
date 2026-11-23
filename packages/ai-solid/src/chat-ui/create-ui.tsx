@@ -8,6 +8,9 @@ import {
   selectMessageUI,
 } from '@tanstack/ai-client/ui'
 import type {
+  ChatUIActivitiesOf,
+  ChatUIActivityPartOf,
+  ChatUIActivityType,
   ChatUIData,
   ChatUIHasNamedInterrupts,
   ChatUIHasNamedTools,
@@ -39,7 +42,8 @@ import type { ChatUIContexts } from './create-ui-contexts'
 export type ChatUIHost<TOptions = unknown> = UseChatReturn<
   ChatUIToolsOf<TOptions>,
   ChatUISchemaOf<TOptions>,
-  ChatUIInterruptsOf<TOptions>
+  ChatUIInterruptsOf<TOptions>,
+  ChatUIActivitiesOf<TOptions>
 >
 
 export type ChatUIQueueItem = QueuedMessage & {
@@ -57,7 +61,12 @@ export type LayoutProps<
 } & (TInput extends Component<any> ? { Input: Component } : {})
 
 export type MessageProps<TOptions> = {
-  message: UIMessage<ChatUIToolsOf<TOptions>, ChatUIData<TOptions>>
+  message: UIMessage<
+    ChatUIToolsOf<TOptions>,
+    ChatUIData<TOptions>,
+    undefined,
+    ChatUIActivitiesOf<TOptions>
+  >
   Parts: Component
 }
 
@@ -81,6 +90,14 @@ export type ToolProps<
   part: Extract<ToolCallPart<ChatUIToolsOf<TOptions>>, { name: TName }>
   result?: ToolResultPart
   interrupt?: ChatUIToolApproval<TOptions, TName>
+}
+
+/** The props of an `activitiesComponents` entry: the part, with typed `content`. */
+export type ActivityProps<
+  TOptions,
+  TName extends ChatUIActivityType<TOptions> = ChatUIActivityType<TOptions>,
+> = {
+  part: ChatUIActivityPartOf<TOptions, TName>
 }
 
 export type InterruptProps<
@@ -134,6 +151,17 @@ export type ChatUIInterruptsComponents<TOptions> = {
   generic: GenericInterruptComponents<TOptions>
 }
 
+// ponytail: a conditional type, so TypeScript fills in `TOptions` before it
+// looks up a key of an inline config. As a plain mapped type, a key from
+// `activities` gets no contextual type there, so its `props` are `any`.
+type ActivityComponentMap<TOptions> = TOptions extends unknown
+  ? {
+      [K in ChatUIActivityType<TOptions>]?: Component<
+        ActivityProps<TOptions, K>
+      >
+    }
+  : never
+
 export type ChatUIComponents<
   TOptions,
   TInput extends Component<InputProps<TOptions>> | undefined = Component<
@@ -142,6 +170,12 @@ export type ChatUIComponents<
 > = {
   components: ChatUIChromeComponents<TOptions, TInput>
   partsComponents: ChatUIPartsComponents<TOptions>
+  /**
+   * One component for each activity type, keyed by the type name. Each one
+   * gets the part with typed `content`. A type with no entry uses
+   * `partsComponents.activity`.
+   */
+  activitiesComponents?: ActivityComponentMap<TOptions>
 } & (ChatUIHasNamedTools<TOptions> extends true
   ? {
       toolsComponents: {
@@ -283,6 +317,9 @@ export function createChatUI<
     input: InputComponent,
     queue: QueueItemComponent,
   } = components
+  // Looked up with the type name that the part has at runtime.
+  const activities: Record<string, Component<any> | undefined> =
+    config.activitiesComponents ?? {}
   const {
     chatContext: chatContextOption,
     partContext: partContextOption,
@@ -592,6 +629,10 @@ export function createChatUI<
         />
       )
     }
+    if (props.selected.part.type === 'activity') {
+      const Activity = activities[props.selected.part.activityType]
+      if (Activity) return <Activity part={props.selected.part} />
+    }
     const PartComponent = (parts[props.selected.key] ?? parts.fallback) as
       | Component<PartProps<TOptions>>
       | undefined
@@ -619,7 +660,9 @@ export function createChatUI<
 
   function BoundRender() {
     const selected = usePartContext()
-    return <SelectedPartInner selected={selected} />
+    // The typed part is the loose part with narrower types. TypeScript cannot
+    // prove that while `TOptions` is generic.
+    return <SelectedPartInner selected={selected as ChatUISelectedPart} />
   }
 
   function Part(props: {

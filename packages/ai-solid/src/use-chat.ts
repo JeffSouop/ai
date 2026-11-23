@@ -18,6 +18,7 @@ import type {
   StructuredOutputPart,
 } from '@tanstack/ai-client'
 import type {
+  AnyActivityTypeDefinition,
   AnyClientTool,
   InterruptDefinition,
   InferSchemaType,
@@ -41,9 +42,11 @@ export function useChat<
   const TInterrupts extends ReadonlyArray<
     InterruptDefinition<any, any, any, any>
   > = readonly [],
+  const TActivities extends ReadonlyArray<AnyActivityTypeDefinition> =
+    readonly [],
 >(
-  options: UseChatOptions<TTools, TSchema, TContext, TInterrupts>,
-): UseChatReturn<TTools, TSchema, TInterrupts> {
+  options: UseChatOptions<TTools, TSchema, TContext, TInterrupts, TActivities>,
+): UseChatReturn<TTools, TSchema, TInterrupts, TActivities> {
   // The hook's identity is its `threadId`. Reload with the same `threadId`
   // restores the same conversation.
 
@@ -68,7 +71,9 @@ export function useChat<
     const transport = options.connection
       ? { connection: options.connection }
       : { fetcher: options.fetcher }
-    const instance = new ChatClient<TTools, TContext, TInterrupts>({
+    // ponytail: `activities` only types `messages`. The client does not read
+    // it, so it is not passed on.
+    return new ChatClient<TTools, TContext, TInterrupts, TActivities>({
       devtoolsBridgeFactory: createChatDevtoolsBridge,
       ...transport,
       ...(options.initialMessages !== undefined && {
@@ -127,7 +132,6 @@ export function useChat<
         options.onInterruptStateChange?.(nextInterruptState, context)
       },
     })
-    return instance
   }
   // Rebuild the client only when `threadId` changes. `on` runs `createClient`
   // untracked, so a reactive `forwardedProps` change does not start a
@@ -256,6 +260,9 @@ export function useChat<
     await client().addToolResult(result)
   }
 
+  const respondToSandboxApproval = (approvalId: string, granted: boolean) =>
+    client().respondToSandboxApproval(approvalId, granted)
+
   const cancelQueued = (id: string) => client().cancelQueued(id)
 
   const resolveInterrupts = (
@@ -349,6 +356,7 @@ export function useChat<
     setMessages: setMessagesManually,
     clear,
     addToolResult,
+    respondToSandboxApproval,
     cancelQueued,
     runId: pick('runId'),
     interrupts,
@@ -360,5 +368,5 @@ export function useChat<
     resumeInterruptsUnsafe,
     partial,
     final,
-  } as unknown as UseChatReturn<TTools, TSchema, TInterrupts>
+  } as unknown as UseChatReturn<TTools, TSchema, TInterrupts, TActivities>
 }
